@@ -91,6 +91,10 @@ class ParseLog(unittest.TestCase):
             'Package minted Error: You must invoke LaTeX with the -shell-escape flag.': '--shell-escape',
             '\\begin{itemize} on input line 3 ended by \\end{enumerate}.': '\\begin{itemize} is closed by',
             'Misplaced alignment tab character &.': '\\&',
+            'Paragraph ended before \\textbf was complete.': 'A closing brace } is missing',
+            'Missing } inserted.': 'Braces { } (or $ signs)',
+            'LaTeX Error: Missing \\begin{document}.': 'before \\begin{document}',
+            'LaTeX Error: Can be used only in preamble.': 'before \\begin{document}',
             'Some message nobody has seen before': None,
         }
         for msg, want in cases.items():
@@ -100,6 +104,12 @@ class ParseLog(unittest.TestCase):
                     self.assertIsNone(got)
                 else:
                     self.assertIn(want, got)
+
+    def test_every_hint_formats(self):
+        # hints are str.format() templates: a literal brace must be doubled, or hint() raises
+        for pattern, text in latexlog.HINTS:
+            with self.subTest(pattern=pattern):
+                text.format(*['x'] * re.compile(pattern).groups)
 
     def test_error_in_bbl_points_at_the_bib_entry(self):
         with tempfile.TemporaryDirectory() as d:
@@ -786,6 +796,13 @@ class Compile(ServerCase):
         self.assertEqual(e['file'], 'sections/introduction.tex')
         self.assertIn('Undefined control sequence', e['message'])
         self.assertTrue(e['hint'])
+
+    def test_unbalanced_brace_is_reported(self):
+        intro = self.root / 'sections' / 'introduction.tex'
+        intro.write_text(intro.read_text() + '\n\\textbf{never closed\n\nNext paragraph.\n')
+        r = self.compile()                   # used to answer 400: the hint's braces broke str.format()
+        self.assertFalse(r['success'])
+        self.assertIn('closing brace', r['errors'][0]['hint'])
 
     def test_bibliography_errors(self):
         bib = self.root / 'refs.bib'

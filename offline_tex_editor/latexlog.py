@@ -9,7 +9,8 @@ ERR = re.compile(r'^((?:[A-Za-z]:)?[^:\n]*?\.[A-Za-z0-9]{1,8}):(\d+): (.*)$')
 WARN = re.compile(r'(?:LaTeX|Package [\w-]+|Class [\w-]+) Warning: (.*?)(?: on input line (\d+))?\.?$')
 WARN_KEYWORDS = ('undefined', 'Citation', 'Reference', 'multiply', 'could not be found', 'Rerun to get')
 
-# (pattern on the message, hint). {0}, {1} are the pattern's groups.
+# (pattern on the message, hint). {0}, {1} are the pattern's groups; the hint is a str.format() template, so a
+# literal brace is written {{ or }}.
 HINTS = [
     (r'Undefined control sequence',
      'A command is misspelled, or the package that defines it is not loaded. The unknown command is the last one '
@@ -24,13 +25,13 @@ HINTS = [
      'LaTeX cannot find {0}. Paths are relative to the main file\'s folder, use forward slashes and are '
      'case-sensitive.'),
     (r'Runaway argument|Paragraph ended before .* was complete|File ended while scanning',
-     'A closing brace } is missing, often on this line or the one before.'),
+     'A closing brace }} is missing, often on this line or the one before.'),
     (r"Missing \} inserted|Extra \}, or forgotten|Too many \}'s|Missing \{ inserted",
-     'Braces { } (or $ signs) do not pair up near this line.'),
+     'Braces {{ }} (or $ signs) do not pair up near this line.'),
     (r'\\begin\{([^}]*)\} on input line \d+ ended by \\end\{([^}]*)\}',
      '\\begin{{{0}}} is closed by \\end{{{1}}}: an environment is left open or closed in the wrong order.'),
     (r'Missing \\begin\{document\}',
-     'Something is typeset before \\begin{document}: look for stray text in the preamble.'),
+     'Something is typeset before \\begin{{document}}: look for stray text in the preamble.'),
     (r'Misplaced alignment tab character &',
      'An & outside a table or an align environment. Write a literal ampersand as \\&.'),
     (r"There's no line here to end",
@@ -45,7 +46,7 @@ HINTS = [
     (r'Option clash for package (\S+)',
      'The package {0} is loaded twice with different options. Load it once, or give the options with '
      '\\PassOptionsToPackage before \\documentclass.'),
-    (r'Can be used only in preamble', 'This command must come before \\begin{document}.'),
+    (r'Can be used only in preamble', 'This command must come before \\begin{{document}}.'),
     (r'Not in outer par mode', 'A figure, table or \\marginpar is inside a box, a minipage or another float.'),
     (r'Dimension too large', 'A length is far too big: often an image scaled by a huge factor, or a TikZ '
                              'coordinate far off.'),
