@@ -1,6 +1,7 @@
 // Autocompletion: \ref labels, \cite keys, environments, file names and commands (built-in and the project's own).
 import { el, app, project, api } from './util.js';
 import { fromMain } from './paths.js';
+import { refArgument, argumentEdit } from './refs.js';
 
 // [name, number of {} arguments]
 const BUILTIN = [
@@ -48,7 +49,8 @@ function context(cm) {
   const at = (kind, token, extra) => ({ kind, token, from: cur.ch - token.length, ...extra });
   const last = s => s.slice(s.lastIndexOf(',') + 1).trimStart();
   let m;
-  if ((m = before.match(/\\(?:[a-zA-Z]*ref|[cC]ref|vref|autoref|nameref|eqref|pageref|labelcref|cpageref)\*?\{([^{}]*)$/))) return at('ref', last(m[1]));
+  const ref = refArgument(before);
+  if (ref) return at('ref', last(ref.typed), { close: ref.close });
   if ((m = before.match(/\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?(?:\[[^\]]*\]){0,2}\{([^{}]*)$/))) return at('cite', last(m[1]));
   if ((m = before.match(/\\(begin|end)\{([a-zA-Z*]*)$/))) return at(m[1], m[2]);
   if ((m = before.match(/\\(input|include|subfile|includegraphics|bibliography|addbibresource|includeonly)(?:\[[^\]]*\])?\{([^{}]*)$/))) {
@@ -140,8 +142,8 @@ function accept() {
     cm.replaceRange(`${it.text}}\n${indent}  \n${indent}\\end{${it.text}}`, from, { line: cur.line, ch: end });
     cm.setCursor({ line: cur.line + 1, ch: indent.length + 2 });
   } else {
-    const closing = line[to] === '}' || line[to] === ',' ? '' : '}';
-    cm.replaceRange(it.text + closing, from, { line: cur.line, ch: to });
+    const e = argumentEdit(line, ctx.from, cur.ch, it.text, ctx.close);
+    cm.replaceRange(e.insert, from, { line: cur.line, ch: e.to });
   }
   cm.focus();
 }
