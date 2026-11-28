@@ -1,6 +1,7 @@
 // The file list: tree, filter, new/rename/delete, upload (button or drag and drop), image and PDF previews.
 import { $, el, app, state, project, store, pkey, api, post, setStatus, dirOf, baseName, icon } from './util.js';
 import { currentFolder, followRename, stillListed } from './folders.js';
+import { figureFolder, pastedName, texSafeName, includeGraphics } from './paths.js';
 
 const IMAGE = /\.(png|jpe?g|gif|svg|webp|bmp)$/i;
 const fileIcon = p => icon(IMAGE.test(p) ? 'image' : /\.bib$/i.test(p) ? 'bib' : /\.(tex|ltx|sty|cls)$/i.test(p) ? 'tex' : 'file');
@@ -144,16 +145,19 @@ const readBase64 = f => new Promise((res, rej) => {
 });
 const ask = text => new Promise(res => app.showBanner(text, 'Replace', () => { app.hideBanner(); res(true); }, 'Skip', () => { app.hideBanner(); res(false); }));
 
-async function upload(files, dir) {
-  let n = 0;
-  for (const f of files) {
-    const path = (dir ? dir + '/' : '') + f.name;
+// Adds files to the project folder `dir` and returns the paths added. names: a name for each file instead of its own.
+async function upload(files, dir, names) {
+  const added = [];
+  for (const [i, f] of files.entries()) {
+    const path = (dir ? dir + '/' : '') + (names ? names[i] : f.name);
     const data = await readBase64(f);
     let r = await post('/api/fs/upload', { path, data });
     if (r.status === 409 && r.exists && await ask(`${path} already exists.`)) r = await post('/api/fs/upload', { path, data, replace: true });
-    if (r.ok) n++; else if (r.status !== 409) setStatus(`could not add ${path}: ${r.error}`, 'err');
+    if (r.ok) added.push(r.path); else if (r.status !== 409) setStatus(`could not add ${path}: ${r.error}`, 'err');
   }
+  const n = added.length;
   if (n) { await loadFiles(); app.filesChanged?.(); setStatus(`added ${n} file${n > 1 ? 's' : ''}${dir ? ' to ' + dir : ''}`, 'ok'); }
+  return added;
 }
 $('uploadBtn').onclick = () => $('uploadInput').click();
 // the tooltip names the folder at the time it is shown (opening a file from a tab changes it too)
@@ -177,6 +181,47 @@ $('files').addEventListener('drop', e => {
   e.preventDefault(); $('files').classList.remove('drop');
   const t = e.target.closest?.('[data-dir], [data-path]');
   upload([...e.dataTransfer.files], t ? (t.dataset.dir ?? dirOf(t.dataset.path)) : '');
+});
+
+// ---------- images pasted or dropped into the editor ----------
+// They are added to the project like uploaded files, and an \includegraphics for each goes where they were put.
+const GRAPHIC = /\.(pdf|png|jpe?g|eps)$/i;   // what \includegraphics reads
+const texOpen = () => /\.tex$/i.test(state.current || '');
+async function insertImages(files, pos, pasted) {
+  const dir = figureFolder(project.dirs || [], project.main), now = new Date();
+  const ext = f => f.type === 'image/jpeg' ? 'jpg' : 'png';
+  const names = files.map((f, i) => pasted ? pastedName(now, ext(f), files.length > 1 ? i + 1 : 0) : texSafeName(f.name));
+  // The upload takes a while: the \includegraphics goes where the files were put, in that document, even after
+  // typing elsewhere or switching to another document in the meantime.
+  const path = state.current, doc = app.cm.getDoc(), mark = doc.setBookmark(pos);
+  const added = await upload(files, dir, names);
+  const at = mark.find();
+  mark.clear();
+  if (!added.length) return;   // nothing uploaded (refused, or replacing skipped): nothing to put in
+  const renamed = pasted ? [] : files.map((f, i) => [f.name, names[i]]).filter(([a, b]) => a !== b).map(([a, b]) => `${a} as ${b}`);
+  const why = renamed.length ? `; saved ${renamed.join(', ')}, since \\includegraphics cannot read # % " \\ { } or repeated spaces` : '';
+  if (app.docOf(path) !== doc || !at) return setStatus(`added ${added.join(', ')}, but ${path} was closed, so no \\includegraphics was put in${why}`, 'err');
+  // on lines of their own, with the paths as LaTeX sees them, from the main document's folder
+  const line = doc.getLine(at.line), before = line.slice(0, at.ch).trim() ? '\n' : '', after = line.slice(at.ch).trim() ? '\n' : '';
+  doc.replaceRange(before + added.map(p => includeGraphics(p, project.main)).join('\n') + after, at);
+  app.refreshDirty?.();
+  if (why || path !== state.current) setStatus(`added ${added.length} file${added.length > 1 ? 's' : ''} and put \\includegraphics in ${path}${why}`, 'ok');
+  if (path === state.current) app.cm.focus();
+}
+app.cm.on('paste', (cm, e) => {
+  const d = e.clipboardData;
+  // Copied text often comes with a picture of itself (from word processors and web pages); then paste the text.
+  if (!texOpen() || !d || d.getData('text/plain')) return;
+  const files = [...d.files].filter(f => f.type === 'image/png' || f.type === 'image/jpeg');
+  if (!files.length) return;
+  e.preventDefault();
+  insertImages(files, cm.getCursor(), true);
+});
+app.cm.on('drop', (cm, e) => {
+  const files = [...(e.dataTransfer?.files || [])].filter(f => GRAPHIC.test(f.name));
+  if (!texOpen() || !files.length) return;
+  e.preventDefault();
+  insertImages(files, cm.coordsChar({ left: e.clientX, top: e.clientY }, 'window'), false);
 });
 
 // ---------- previews ----------

@@ -68,6 +68,7 @@ const docs = new Map();   // path -> { doc, mtime, gen, encoding }
 let tabs = [];
 
 export const isDirty = p => { const d = docs.get(p); return !!d && !d.doc.isClean(d.gen); };
+export const docOf = p => docs.get(p)?.doc;   // the open document of a file, or undefined
 const anyDirty = () => [...docs.keys()].some(isDirty);
 const saveTabs = () => store.set(pkey('tabs'), tabs);
 
@@ -246,5 +247,5 @@ cm.on('cursorActivity', debounce(() => app.onCursor?.(), 150));
 window.addEventListener('beforeunload', e => { if (anyDirty()) { e.preventDefault(); e.returnValue = ''; } });
 
 Object.assign(app, { openFile, closeTab, restoreTabs, renameDoc, dropDoc, save, saveAll, reloadFromDisk, reloadClean,
-                     checkExternalChange, showBanner, hideBanner, markErrors, markConflicts, refreshDirty, isDirty,
+                     checkExternalChange, showBanner, hideBanner, markErrors, markConflicts, refreshDirty, isDirty, docOf,
                      setSpellcheck });
