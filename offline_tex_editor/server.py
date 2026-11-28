@@ -563,6 +563,15 @@ def word_count():
 
 # ---------- export ----------
 
+def export_file(path):
+    """A resolved, regular file inside the project, or None (including broken or cyclic links)."""
+    try:
+        real = path.resolve()
+        return real if ROOT in real.parents and real.is_file() else None
+    except (OSError, RuntimeError):
+        return None
+
+
 def export_zip():
     """The project's sources as a .zip, as they are saved: its files, without build/, .git/ or other hidden files and
     folders (.latexmkrc is kept), and with the bibliography made in the last compile (build/<job>.bbl) next to the
@@ -571,29 +580,31 @@ def export_zip():
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
         for p, rel in project.walk(ROOT):
             hidden = any(part.startswith('.') for part in rel.split('/')) and rel not in project.EDITABLE_NAMES
-            real = p.resolve()
-            if hidden or ROOT not in real.parents:  # a link to a file outside the project is left out
+            real = export_file(p)
+            if hidden or real is None:
                 continue
             z.write(real, rel)
             names.add(rel)
-        bbl, name = ROOT / 'build' / f'{JOB}.bbl', Path(MAIN).with_suffix('.bbl').as_posix()
-        if bbl.is_file() and name not in names:
+        bbl, name = export_file(ROOT / 'build' / f'{JOB}.bbl'), Path(MAIN).with_suffix('.bbl').as_posix()
+        if bbl is not None and name not in names:
             z.write(bbl, name)
     return buf.getvalue()
 
 
 def export_note():
     """What to tell about the .bbl in the .zip, or None: none was made yet, or it may be older than the sources."""
-    if (ROOT / Path(MAIN).with_suffix('.bbl')).is_file():
+    if export_file(ROOT / Path(MAIN).with_suffix('.bbl')) is not None:
         return None   # the project's own .bbl goes in as it is
     files = list_files()
-    bibs = [ROOT / f for f in files if f.endswith('.bib')]
-    bbl, aux = ROOT / 'build' / f'{JOB}.bbl', ROOT / 'build' / f'{JOB}.aux'
-    if not bbl.is_file():
-        return ('No bibliography from a compile yet, so the .zip has no .bbl. If the document uses BibTeX or biber, '
+    sources = [p for f in files if f.endswith(('.tex', '.bib')) for p in [export_file(ROOT / f)] if p is not None]
+    bibs = [p for f in files if f.endswith('.bib') for p in [export_file(ROOT / f)] if p is not None]
+    bbl, aux = export_file(ROOT / 'build' / f'{JOB}.bbl'), export_file(ROOT / 'build' / f'{JOB}.aux')
+    if bbl is None:
+        return ('No bibliography from a compile is available inside the project, so the .zip has no .bbl. '
+                'If the document uses BibTeX or biber, '
                 'compile it, then download again.') if bibs else None
-    newest = max((p.stat().st_mtime for p in [ROOT / f for f in files if f.endswith(('.tex', '.bib'))]), default=0)
-    compiled = aux.stat().st_mtime if aux.is_file() else bbl.stat().st_mtime
+    newest = max((p.stat().st_mtime for p in sources), default=0)
+    compiled = aux.stat().st_mtime if aux is not None else bbl.stat().st_mtime
     if newest > compiled or any(b.stat().st_mtime > bbl.stat().st_mtime for b in bibs):
         return 'Sources changed since the last compile, so the .bbl may be out of date. Recompile, then download again.'
     return None

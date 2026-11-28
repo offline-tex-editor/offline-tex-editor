@@ -608,6 +608,52 @@ class ExportZip(ServerCase):
         self.assertEqual(files['figures/p.png'], b'\x89PNG')
         self.assertIsNone(note)
 
+    def symlink(self, link, target, directory=False):
+        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            link.symlink_to(target, target_is_directory=directory)
+        except OSError as e:
+            if os.name == 'nt':
+                self.skipTest(f'symlinks unavailable: {e}')
+            raise
+
+    def test_compiled_bibliography_cannot_link_outside_project(self):
+        outside = Path(self.tmp.name) / 'outside.bbl'
+        outside.write_text('PRIVATE CONTENT')
+        self.symlink(self.root / 'build/main.bbl', outside)
+        files, note = self.export()
+        self.assertNotIn('main.bbl', files)
+        self.assertIn('no .bbl', note)
+
+    def test_build_directory_cannot_link_outside_project(self):
+        outside = Path(self.tmp.name) / 'external-build'
+        outside.mkdir()
+        (outside / 'main.bbl').write_text('PRIVATE CONTENT')
+        if (self.root / 'build').exists():
+            shutil.rmtree(self.root / 'build')
+        self.symlink(self.root / 'build', outside, directory=True)
+        files, note = self.export()
+        self.assertNotIn('main.bbl', files)
+        self.assertIn('no .bbl', note)
+
+    def test_excluded_source_bibliography_does_not_suppress_note_or_fallback(self):
+        outside = Path(self.tmp.name) / 'outside.bbl'
+        outside.write_text('PRIVATE CONTENT')
+        self.symlink(self.root / 'main.bbl', outside)
+        files, note = self.export()
+        self.assertNotIn('main.bbl', files)
+        self.assertIn('no .bbl', note)
+        write(self.root, {'build/main.bbl': 'safe compiled bibliography', 'build/main.aux': ''})
+        files, note = self.export()
+        self.assertEqual(files['main.bbl'], b'safe compiled bibliography')
+        self.assertIsNone(note)
+
+    def test_bibliography_links_inside_project_are_kept(self):
+        write(self.root, {'bibliography.bbl': 'safe bibliography'})
+        self.symlink(self.root / 'build/main.bbl', self.root / 'bibliography.bbl')
+        files, _ = self.export()
+        self.assertEqual(files['main.bbl'], b'safe bibliography')
+
     def test_nested_main_document_and_custom_job_name(self):
         write(self.root, {'paper/main.tex': '\\documentclass{article}\n', 'build/thesis.bbl': 'thesis bbl',
                           'build/main.bbl': 'an older job'})
@@ -626,7 +672,7 @@ class ExportZip(ServerCase):
     def test_missing_build_output(self):
         files, note = self.export()
         self.assertNotIn('main.bbl', files)
-        self.assertIn('No bibliography from a compile yet', note)
+        self.assertIn('No bibliography from a compile', note)
         (self.root / 'refs.bib').unlink()   # no bibliography at all: nothing to say
         self.assertIsNone(self.export()[1])
 

@@ -71,3 +71,23 @@ test('several paragraphs are wrapped one by one, since \\textbf cannot span a bl
   // a blank line at the end of the selection is left out
   assert.equal(apply('', 'first\n\n', ''), '[\\textbf{first}\n\n]');
 });
+
+test('comments stay outside a closing brace and their braces do not affect balance', () => {
+  assert.equal(apply('', 'hello % comment', ''), '\\textbf{[hello ]}% comment');
+  assert.equal(apply('', 'one % } ignored\ntwo', ''), '\\textbf{[one % } ignored\ntwo]}');
+  assert.equal(apply('\\textbf{', 'one % } ignored\ntwo', '}'), '[one % } ignored\ntwo]');
+  assert.equal(apply('', '50\\% off', ''), '\\textbf{[50\\% off]}');
+  assert.equal(apply('', 'one % comment\n\ntwo % end', ''), '[\\textbf{one }% comment\n\n\\textbf{two }% end]');
+  assert.equal(apply('', '\\textbf{one }% comment\n\n\\textbf{two }% end', ''), '[one % comment\n\ntwo % end]');
+});
+
+test('only an unescaped command outside a comment can be unwrapped', () => {
+  assert.equal(apply('first\\\\textbf{', 'word', '}'), 'first\\\\textbf{\\textbf{[word]}}');
+  assert.equal(apply('first\\\\\\textbf{', 'word', '}'), 'first\\\\[word]');
+  assert.equal(apply('% \\textbf{', 'word', '}'), '% \\textbf{\\textbf{[word]}}');
+});
+
+test('a whole selected command is not unwrapped when its prefix is escaped or commented', () => {
+  assert.equal(apply('first\\', '\\textbf{word}', ''), 'first\\\\textbf{[\\textbf{word}]}');
+  assert.equal(apply('% ', '\\textbf{word}', ''), '% \\textbf{[\\textbf{word}]}');
+});

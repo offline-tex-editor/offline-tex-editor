@@ -45,3 +45,12 @@ test('deleting the clicked file or its folder falls back to the open file\'s fol
   assert.deepEqual(stillListed(file('old/note.tex'), ['old/note.tex'], ['old']), file('old/note.tex'));
   assert.deepEqual(stillListed(folder(''), [], []), folder(''));
 });
+
+test('an external rename or delete cannot leave a missing destination through the open document', () => {
+  const dirs = ['paper', 'renamed'];
+  const clicked = stillListed(file('old/note.tex'), ['paper/main.tex', 'renamed/note.tex'], dirs);
+  assert.equal(currentFolder(clicked, 'old/note.tex', dirs), '');
+  assert.equal(currentFolder(null, 'paper/main.tex', dirs), 'paper');
+  assert.equal(currentFolder(folder(''), 'old/note.tex', dirs), '');
+  assert.equal(currentFolder(folder('old'), 'paper/main.tex', dirs), '');
+});

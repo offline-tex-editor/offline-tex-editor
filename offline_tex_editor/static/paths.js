@@ -27,9 +27,9 @@ export function figureFolder(dirs, main) {
 }
 
 // A file name that \includegraphics can read: LaTeX stops at #, %, ", \ and unbalanced braces in it, and reads several
-// spaces as one, so those become "-" and a single space.
+// spaces as one. Consecutive carets trigger TeX input conversion. Those become "-" and a single space.
 export function texSafeName(name) {
-  return name.replace(/[#%"\\{}]/g, '-').replace(/\s+/g, ' ').trim();
+  return name.replace(/[#%"\\{}]|\^{2,}/g, '-').replace(/\s+/g, ' ').trim();
 }
 
 // The \includegraphics line for an image at `path` (relative to the project folder), as the main document sees it.

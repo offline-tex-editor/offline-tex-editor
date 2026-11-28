@@ -1,11 +1,21 @@
 // Wrapping the selection in a command such as \textbf{...}, or unwrapping it. Pure functions, tested with
 // `node --test tests/`.
 
-// Whether the braces in `s` pair up (escaped \{ and \} do not count).
+// Index of the comment on the last line, or s.length. Escaped percent signs are literal text.
+function trailingComment(s) {
+  for (let i = s.lastIndexOf('\n') + 1; i < s.length; i++) {
+    if (s[i] === '\\') i++;
+    else if (s[i] === '%') return i;
+  }
+  return s.length;
+}
+
+// Whether the braces in `s` pair up (escaped braces and braces in comments do not count).
 function balanced(s) {
   let depth = 0;
   for (let i = 0; i < s.length; i++) {
     if (s[i] === '\\') i++;
+    else if (s[i] === '%') { const end = s.indexOf('\n', i); i = end < 0 ? s.length : end; }
     else if (s[i] === '{') depth++;
     else if (s[i] === '}' && --depth < 0) return false;
   }
@@ -15,6 +25,21 @@ function balanced(s) {
 // Whether `s` is one \cmd{...} group (`open` is "\cmd{") and nothing else.
 const isWrapped = (open, s) => s.startsWith(open) && s.endsWith('}') && balanced(s) && balanced(s.slice(open.length, -1));
 
+const wrap = (open, s) => {
+  const end = trailingComment(s);
+  return open + s.slice(0, end) + '}' + s.slice(end);
+};
+const unwrap = (open, s) => {
+  const end = trailingComment(s), body = s.slice(0, end);
+  return isWrapped(open, body) ? body.slice(open.length, -1) + s.slice(end) : null;
+};
+
+function escaped(s, at) {
+  let slashes = 0;
+  for (let i = at - 1; i >= 0 && s[i] === '\\'; i--) slashes++;
+  return slashes % 2 !== 0;
+}
+
 // The selection fills a chain of groups, \cmd{ is one of them: where in `before` it starts, and how many groups are
 // inside it. With "x" selected in \textbf{\textit{x}}, \textbf{ is found one group out. Null when it is not there.
 function enclosing(open, before, after) {
@@ -22,6 +47,8 @@ function enclosing(open, before, after) {
   for (let inner = 0; after[inner] === '}'; inner++) {
     const m = rest.match(/\\[a-zA-Z]+\{$/);
     if (!m) return null;
+    const start = rest.length - m[0].length;
+    if (escaped(rest, start) || trailingComment(rest) < start) return null;
     if (m[0] === open) return { start: rest.length - open.length, inner };
     rest = rest.slice(0, -m[0].length);
   }
@@ -49,17 +76,20 @@ export function toggleWrap(cmd, before, selected, after) {
     return { cutBefore: before.length - around.start, cutAfter: around.inner + 1, text,
              select: [inner.length, inner.length + selected.length] };
   }
-  if (isWrapped(open, selected)) {
-    const text = selected.slice(open.length, -1);
+  const unwrapped = escaped(before, before.length) || trailingComment(before) < before.length
+    ? null : unwrap(open, selected);
+  if (unwrapped !== null) {
+    const text = unwrapped;
     return { cutBefore: 0, cutAfter: 0, text, select: [0, text.length] };
   }
   const parts = selected.split(PARAGRAPH_BREAK);   // paragraphs at even indexes, the breaks between them at odd ones
   if (parts.length > 1) {
     const paragraphs = parts.filter((p, i) => i % 2 === 0 && p.trim());
-    const unwrap = paragraphs.every(p => isWrapped(open, p));
-    const text = parts.map((p, i) => i % 2 || !p.trim() ? p : unwrap ? p.slice(open.length, -1)
-                                      : isWrapped(open, p) ? p : open + p + '}').join('');
+    const remove = paragraphs.every(p => unwrap(open, p) !== null);
+    const text = parts.map((p, i) => i % 2 || !p.trim() ? p : remove ? unwrap(open, p)
+                                      : unwrap(open, p) !== null ? p : wrap(open, p)).join('');
     return { cutBefore: 0, cutAfter: 0, text, select: [0, text.length] };
   }
-  return { cutBefore: 0, cutAfter: 0, text: open + selected + '}', select: [open.length, open.length + selected.length] };
+  return { cutBefore: 0, cutAfter: 0, text: wrap(open, selected),
+           select: [open.length, open.length + trailingComment(selected)] };
 }

@@ -92,7 +92,7 @@ TeX installation, so reports are welcome.
 - Paste a screenshot, or drop images (PDF, PNG, JPEG, EPS) onto the editor: they are saved in the `figures`
   folder next to the main document (or `figs`, `images`, `img`, `graphics`; without one, next to the main document),
   and an `\includegraphics` for each is put where you pasted or dropped them. In file names, characters that
-  `\includegraphics` cannot read (`#`, `%`, `"`, `\`, braces) are saved as `-`, and repeated spaces as one
+  `\includegraphics` cannot read (`#`, `%`, `"`, `\`, braces, consecutive carets) are saved as `-`, and repeated spaces as one
 - Search and replace in all files, with the same options (Ctrl/Cmd+Shift+F). With regular expressions, `$1`
   in the replacement inserts the first group (`$&` the whole match); backslashes are kept as typed, so
   `\textbf{$1}` works

@@ -64,3 +64,14 @@ test('the \\includegraphics path is relative to the main document, also in a sub
   assert.equal(includeGraphics('paper/x.png', 'paper/main.tex'), '\\includegraphics[width=\\linewidth]{x.png}');
   assert.equal(includeGraphics('a/b/figs/x.png', 'a/b/main.tex'), '\\includegraphics[width=\\linewidth]{figs/x.png}');
 });
+
+test('TeX input conversion cannot reinterpret consecutive carets in uploaded names', () => {
+  for (const name of ['a^^41.pdf', 'a^^25.png', 'a^^^^0041.pdf', 'a^^^^^^000041.pdf']) {
+    const safe = texSafeName(name);
+    assert.equal(safe.includes('^^'), false);
+    assert.equal(includeGraphics('figures/' + safe, 'main.tex'),
+      `\\includegraphics[width=\\linewidth]{figures/${safe}}`);
+  }
+  assert.equal(texSafeName('a^^41.pdf'), 'a-41.pdf');
+  assert.equal(texSafeName('a^b.png'), 'a^b.png');
+});

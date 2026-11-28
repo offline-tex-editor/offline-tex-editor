@@ -8,9 +8,10 @@ const dirOf = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
 
 // The current folder: the folder clicked last, or the folder of the file clicked last; before any click, the folder
 // of the open file (`current`), or the project folder ('').
-export function currentFolder(clicked, current) {
-  if (clicked) return clicked.dir ? clicked.path : dirOf(clicked.path);
-  return current ? dirOf(current) : '';
+export function currentFolder(clicked, current, dirs) {
+  const dir = clicked ? (clicked.dir ? clicked.path : dirOf(clicked.path)) : current ? dirOf(current) : '';
+  // An open document can outlive a folder renamed or deleted outside the editor.
+  return !dirs || dirs.includes(dir) ? dir : '';
 }
 
 // After `from` (a file or a folder) was renamed or moved to `to`: the clicked row moves along when it is `from` or
