@@ -267,6 +267,7 @@ two, and keeps the server's version of any file that differs as a "(server copy)
 | Double-click the PDF | Jump to the source |
 | Ctrl+Space | Complete a command, label or citation key |
 | Ctrl/Cmd+/ | Comment or uncomment lines |
+| Ctrl/Cmd+B, Ctrl/Cmd+I | Put the selection in `\textbf{}` or `\textit{}`, or take it out again |
 | Ctrl/Cmd+F | Find in the file (in the editor) or in the PDF (elsewhere) |
 | Ctrl+H, Cmd+Option+F | Find and replace in the file |
 | Enter, Shift+Enter | Next and previous match (also F3 and Ctrl/Cmd+G) |

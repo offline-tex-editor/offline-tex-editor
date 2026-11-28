@@ -1,5 +1,6 @@
 // The source editor: CodeMirror, open documents and their tabs, saving, error and conflict marks, spell check.
 import { $, el, app, state, store, pkey, api, post, setStatus, baseName, debounce } from './util.js';
+import { toggleWrap } from './wrap.js';
 
 const TEX = /\.(tex|sty|cls|bib|bst|tikz|bbx|cbx|lbx|dtx|ins|ltx|cfg|def|clo)$/;
 const modeFor = p => p.endsWith('.py') ? 'python' : p.endsWith('.md') ? 'markdown' : TEX.test(p) ? 'stex' : 'text/plain';
@@ -13,6 +14,8 @@ export const cm = CodeMirror.fromTextArea($('ed'), {
     'Ctrl-Enter': () => app.compile(), 'Cmd-Enter': () => app.compile(),
     'Ctrl-J': () => app.syncToPdf(), 'Cmd-J': () => app.syncToPdf(),
     'Ctrl-/': c => toggleComment(c), 'Cmd-/': c => toggleComment(c),
+    'Ctrl-B': c => toggleCommand(c, 'textbf'), 'Cmd-B': c => toggleCommand(c, 'textbf'),
+    'Ctrl-I': c => toggleCommand(c, 'textit'), 'Cmd-I': c => toggleCommand(c, 'textit'),
     'Ctrl-Space': () => app.complete(true),
     'Ctrl-F': () => app.openFindBar(false), 'Cmd-F': () => app.openFindBar(false),
     'Ctrl-H': () => app.openFindBar(true), 'Cmd-Alt-F': () => app.openFindBar(true),
@@ -37,6 +40,18 @@ function toggleComment(c) {
     if (all) { const m = s.match(/^(\s*)% ?/); if (m) c.replaceRange(m[1], { line: l, ch: 0 }, { line: l, ch: m[0].length }); }
     else if (s.trim()) c.replaceRange('% ', { line: l, ch: 0 });
   } });
+}
+
+// Ctrl/Cmd+B and Ctrl/Cmd+I: put the selection in \textbf{} or \textit{}, or take it out again.
+function toggleCommand(c, cmd) {
+  const from = c.getCursor('from'), to = c.getCursor('to');
+  const e = toggleWrap(cmd, c.getLine(from.line).slice(0, from.ch), c.getRange(from, to), c.getLine(to.line).slice(to.ch));
+  const start = { line: from.line, ch: from.ch - e.cutBefore };
+  c.operation(() => {
+    c.replaceRange(e.text, start, { line: to.line, ch: to.ch + e.cutAfter });
+    const at = i => c.posFromIndex(c.indexFromPos(start) + i);
+    c.setSelection(at(e.select[0]), at(e.select[1]));
+  });
 }
 
 // ---------- spell check ----------
