@@ -6,7 +6,9 @@ Tests that need git, latexmk, synctex, xelatex, biber or texcount are skipped wh
 """
 import base64
 import http.client
+import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -15,6 +17,8 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -570,6 +574,84 @@ class FileOperations(ServerCase):
         self.assertEqual(self.post('/api/fs/upload', {'path': 'figures/p.png', 'data': data, 'replace': True})[0], 200)
         self.assertEqual(self.post('/api/fs/upload', {'path': 'evil.html', 'data': data})[0], 400)
         self.assertEqual(self.post('/api/fs/upload', {'path': 'x.png', 'data': '!!notbase64'})[0], 400)
+
+
+class ExportZip(ServerCase):
+    """Downloading the project's sources as a .zip (/api/export), on a copy of example/ (main.tex, refs.bib)."""
+
+    def export(self):
+        code, data, r = self.get('/api/export')
+        self.assertEqual((code, r.getheader('Content-Type')), (200, 'application/zip'), data)
+        note = r.getheader('X-Export-Note')
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            return {n: z.read(n) for n in z.namelist()}, note and urllib.parse.unquote(note)
+
+    def age(self, rel, seconds):
+        t = time.time() - seconds
+        os.utime(self.root / rel, (t, t))
+
+    def test_files_without_build_hidden_files_and_outside_links(self):
+        write(self.root, {'figures/p.png': b'\x89PNG', '.latexmkrc': '$pdf_mode = 1;\n', '.env': 'KEY=1\n',
+                          '.vscode/settings.json': '{}', 'build/main.bbl': '\\begin{thebibliography}{1}\n',
+                          'build/main.aux': '', 'build/main.pdf': b'%PDF'})
+        outside = Path(self.tmp.name) / 'secret.txt'
+        outside.write_text('not part of the project')
+        try:
+            (self.root / 'link.txt').symlink_to(outside)
+        except OSError:  # Windows without the right to make links
+            pass
+        files, note = self.export()
+        # no build/, no hidden files but .latexmkrc, nothing from outside; the .bbl next to the main document
+        self.assertEqual(sorted(files), ['.latexmkrc', 'figures/p.png', 'main.bbl', 'main.tex', 'refs.bib',
+                                         'sections/introduction.tex'])
+        self.assertEqual(files['main.bbl'], b'\\begin{thebibliography}{1}\n')
+        self.assertEqual(files['figures/p.png'], b'\x89PNG')
+        self.assertIsNone(note)
+
+    def test_nested_main_document_and_custom_job_name(self):
+        write(self.root, {'paper/main.tex': '\\documentclass{article}\n', 'build/thesis.bbl': 'thesis bbl',
+                          'build/main.bbl': 'an older job'})
+        server.configure(self.root, 'paper/main.tex', jobname='thesis')
+        files, _ = self.export()
+        # LaTeX looks for the .bbl next to the main document, under its name, whatever the job was called
+        self.assertEqual(files['paper/main.bbl'], b'thesis bbl')
+        self.assertNotIn('main.bbl', files)
+
+    def test_a_bbl_of_the_project_is_kept(self):
+        write(self.root, {'main.bbl': 'written by hand', 'build/main.bbl': 'from the compile', 'build/main.aux': ''})
+        files, note = self.export()
+        self.assertEqual(files['main.bbl'], b'written by hand')
+        self.assertIsNone(note)
+
+    def test_missing_build_output(self):
+        files, note = self.export()
+        self.assertNotIn('main.bbl', files)
+        self.assertIn('No bibliography from a compile yet', note)
+        (self.root / 'refs.bib').unlink()   # no bibliography at all: nothing to say
+        self.assertIsNone(self.export()[1])
+
+    def test_stale_build_output(self):
+        write(self.root, {'build/main.bbl': 'old', 'build/main.aux': ''})
+        for rel, seconds in (('main.tex', 1200), ('refs.bib', 1200), ('sections/introduction.tex', 1200),
+                             ('build/main.bbl', 600), ('build/main.aux', 600)):
+            self.age(rel, seconds)
+        self.assertIsNone(self.export()[1])   # compiled after the last save
+        self.age('sections/introduction.tex', 0)
+        files, note = self.export()   # a source saved after the last compile
+        self.assertEqual(files['main.bbl'], b'old')
+        self.assertIn('may be out of date', note)
+        self.age('sections/introduction.tex', 1200)
+        self.age('refs.bib', 300)   # a .bib newer than the .bbl, even if LaTeX ran since
+        self.age('build/main.aux', 0)
+        self.assertIn('may be out of date', self.export()[1])
+
+    def test_unicode_file_names(self):
+        write(self.root, {'figures/ä b.png': b'png', 'kapitel/Über.tex': 'Ü'})
+        code, data, _ = self.get('/api/export')
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            self.assertEqual(z.read('figures/ä b.png'), b'png')
+            self.assertEqual(z.read('kapitel/Über.tex'), 'Ü'.encode())
+            self.assertTrue(z.getinfo('kapitel/Über.tex').flag_bits & 0x800)   # names marked as UTF-8
 
 
 class SearchApi(ServerCase):
