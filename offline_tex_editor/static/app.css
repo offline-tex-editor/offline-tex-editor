@@ -113,6 +113,15 @@ label.tog:has(input:focus-visible) { outline: 2px solid var(--accent); outline-o
 #files .f.active .ic { color: var(--accent); }
 #files .dir.cur { background: var(--sel); }   /* where Add files and New file/folder go */
 #files .f.asset .nm { color: var(--muted); }
+#files .f, #files .dir { user-select: none; }   /* Shift+click selects rows, not text */
+/* the ring in the panel's color keeps selected rows apart, without moving the rows */
+#files .f.sel, #files .dir.sel { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 0 0 0 1.5px var(--panel); }
+#selBar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 0 6px 6px; padding: 3px 3px 3px 8px;
+          border-radius: 6px; background: var(--sel); font-size: 12px; }
+#selBar[hidden] { display: none; }
+#selCount { white-space: nowrap; }
+#selActs { display: inline-flex; gap: 3px; margin-left: auto; }   /* the buttons wrap as one group */
+#selBar button { padding: 1px 6px; font-size: 12px; }
 #files .f.mod .nm::after { content: " ●"; color: var(--warn); }
 #files .badge { font-size: 10px; font-weight: 600; color: var(--accent); background: var(--sel); border-radius: 4px; padding: 1px 5px; }
 #files .acts { display: none; gap: 0; margin-right: -4px; }

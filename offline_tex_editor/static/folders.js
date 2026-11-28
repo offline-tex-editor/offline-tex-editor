@@ -14,13 +14,16 @@ export function currentFolder(clicked, current, dirs) {
   return !dirs || dirs.includes(dir) ? dir : '';
 }
 
-// After `from` (a file or a folder) was renamed or moved to `to`: the clicked row moves along when it is `from` or
-// inside it.
+// Where `path` is after `from` (a file or a folder) was renamed or moved to `to`: moved along when it is `from` or
+// inside it, else where it was.
+export function renamedPath(path, from, to) {
+  if (path === from) return to;
+  return path.startsWith(from + '/') ? to + path.slice(from.length) : path;
+}
+
+// After `from` was renamed or moved to `to`: the clicked row moves along when it is `from` or inside it.
 export function followRename(clicked, from, to) {
-  if (!clicked || !clicked.path) return clicked;
-  if (clicked.path === from) return { ...clicked, path: to };
-  if (clicked.path.startsWith(from + '/')) return { ...clicked, path: to + clicked.path.slice(from.length) };
-  return clicked;
+  return !clicked || !clicked.path ? clicked : { ...clicked, path: renamedPath(clicked.path, from, to) };
 }
 
 // After the file list was read again: the clicked row, or null when it is no longer there (deleted, or renamed

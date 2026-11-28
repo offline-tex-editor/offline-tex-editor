@@ -1,12 +1,16 @@
-// The file list: tree, filter, new/rename/delete, upload (button or drag and drop), image and PDF previews.
+// The file list: tree, filter, new/rename/delete, selecting several (download or delete them together), upload
+// (button or drag and drop), image and PDF previews.
+import { $, el, app, state, project, store, pkey, api, post, setStatus, dirOf, baseName, icon, confirmClick } from './util.js';
+import { rangeBetween, topmost, forDeleting, deletionReport, renameSelection, stillSelected } from './selection.js';
 import { currentFolder, followRename, stillListed } from './folders.js';
-import { $, el, app, state, project, store, pkey, api, post, setStatus, dirOf, baseName, icon } from './util.js';
 import { figureFolder, pastedName, texSafeName, includeGraphics } from './paths.js';
 
 const IMAGE = /\.(png|jpe?g|gif|svg|webp|bmp)$/i;
 const fileIcon = p => icon(IMAGE.test(p) ? 'image' : /\.bib$/i.test(p) ? 'bib' : /\.(tex|ltx|sty|cls)$/i.test(p) ? 'tex' : 'file');
-// The folder that Add files, New file and New folder work in (see folders.js); it follows renames and is forgotten when
-// what was clicked is gone.
+let selected = new Set(), anchor = null;   // selected files and folders; anchor: where a Shift+click range starts
+// The folder that Add files, New file and New folder work in (see folders.js): set by a plain click on a row, never
+// by Ctrl/Shift+click, so selecting several does not move it. It follows renames and is forgotten when what was
+// clicked is gone.
 let clicked = null;   // { path, dir } of the last row clicked
 const currentDir = () => currentFolder(clicked, state.current, project.dirs || []);
 
@@ -14,6 +18,8 @@ export async function loadFiles() {
   const r = await api('/api/files');
   if (!r.ok) return setStatus('cannot list files: ' + (r.error || r.status), 'err');
   Object.assign(project, { root: r.root, main: r.main, files: r.files || [], assets: r.assets || [], dirs: r.dirs || [] });
+  selected = new Set(stillSelected([...selected], new Set([...project.files, ...project.assets, ...project.dirs])));
+  if (anchor && !selected.has(anchor) && !project.files.includes(anchor) && !project.dirs.includes(anchor)) anchor = null;
   clicked = stillListed(clicked, [...project.files, ...project.assets], project.dirs);
   $('mainDoc').textContent = project.main;
   renderFiles();
@@ -35,10 +41,10 @@ function tree() {
 export function renderFiles() {
   const q = $('filter').value.toLowerCase().trim(), box = $('files');
   const collapsed = new Set(store.get(pkey('collapsed'), []));
-  const rows = [];
+  const rows = [], sel = p => selected.size > 1 && selected.has(p) ? ' sel' : '';
   const fileRow = (f, depth) => {
-    const row = el('div', { className: 'f' + (f.asset ? ' asset' : '') + (f.path === state.current ? ' active' : '') + (app.isDirty?.(f.path) ? ' mod' : ''),
-                            title: f.path, dataset: { path: f.path }, onclick: () => { clicked = { path: f.path, dir: false }; f.asset ? preview(f.path) : app.openFile(f.path); } },
+    const row = el('div', { className: 'f' + (f.asset ? ' asset' : '') + (f.path === state.current ? ' active' : '') + (app.isDirty?.(f.path) ? ' mod' : '') + sel(f.path),
+                            title: f.path, dataset: { path: f.path }, onclick: e => pick(e, f.path, () => f.asset ? preview(f.path) : app.openFile(f.path)) },
       fileIcon(f.path), el('span', { className: 'nm' }, baseName(f.path)),
       f.path === project.main ? el('span', { className: 'badge', title: 'Main document' }, 'main') : null,
       actions(f.path, false));
@@ -53,10 +59,9 @@ export function renderFiles() {
       const d = path ? `${path}/${name}` : name, child = n.dirs.get(name);
       if (q && !hasMatch(child, q)) continue;
       const open = q || !collapsed.has(d);
-      const head = el('div', { className: 'dir toggle' + (open ? ' open' : '') + (clicked?.dir && clicked.path === d ? ' cur' : ''), title: d, dataset: { dir: d }, onclick: () => {
-        clicked = { path: d, dir: true };
+      const head = el('div', { className: 'dir toggle' + (open ? ' open' : '') + sel(d) + (clicked?.dir && clicked.path === d ? ' cur' : ''), title: d, dataset: { dir: d }, onclick: e => pick(e, d, () => {
         const s = new Set(store.get(pkey('collapsed'), [])); s.has(d) ? s.delete(d) : s.add(d); store.set(pkey('collapsed'), [...s]); renderFiles();
-      } }, icon('chevron', 'chev'), icon('folder', 'fold'), el('span', { className: 'nm' }, name), actions(d, true));
+      }) }, icon('chevron', 'chev'), icon('folder', 'fold'), el('span', { className: 'nm' }, name), actions(d, true));
       head.style.paddingLeft = (6 + depth * 14) + 'px';
       rows.push(head);
       if (open) walk(child, d, depth + 1);
@@ -64,6 +69,8 @@ export function renderFiles() {
   };
   walk(tree(), '', 0);
   box.replaceChildren(...rows);
+  $('selBar').hidden = selected.size < 2;
+  $('selCount').textContent = `${selected.size} selected`;
 }
 // a click below the rows makes the project folder the current folder again
 $('files').addEventListener('click', e => { if (e.target === $('files')) { clicked = { path: '', dir: true }; renderFiles(); } });
@@ -94,6 +101,61 @@ async function remove(path) {
   setStatus(`moved ${path} to ${r.trash}`, 'ok');
 }
 
+// ---------- selecting several ----------
+// Ctrl/Cmd+click adds a row to the selection or takes it out; Shift+click selects the rows from the last one clicked
+// to this one. A plain click selects only that row and does what it always did (open, preview, fold or unfold), but
+// folding or unfolding a folder keeps a selection of several, so that more rows can be added from inside it.
+const shown = () => [...$('files').querySelectorAll('[data-path], [data-dir]')].map(r => r.dataset.path ?? r.dataset.dir);
+function pick(e, path, open) {
+  if (e.ctrlKey || e.metaKey) {
+    // The first Ctrl+click adds to the row clicked last (an image, a folder or the open file). If that was a file and
+    // another one has been opened since (from a tab, say), it adds to the open file, which the list shows instead.
+    const last = selected.size === 1 ? [...selected][0] : null;
+    if (selected.size < 2 && !(last && shown().includes(last) && (last === state.current || !project.files.includes(last))))
+      selected = new Set(state.current && shown().includes(state.current) ? [state.current] : []);
+    selected.has(path) ? selected.delete(path) : selected.add(path);
+    anchor = path;
+  } else if (e.shiftKey) {
+    selected = new Set(rangeBetween(shown(), anchor ?? state.current, path));
+  } else {
+    clicked = { path, dir: project.dirs.includes(path) };   // the current folder follows plain clicks only
+    if (!(selected.size > 1 && clicked.dir)) { selected = new Set([path]); anchor = path; }
+    renderFiles();
+    return open();
+  }
+  renderFiles();
+}
+const folderName = () => project.root.split(/[\\/]/).filter(Boolean).pop() || 'project';
+// Like Download sources in ⚙: open files are saved first, so the .zip has what is on screen, and a refusal is reported
+// instead of being saved as the .zip.
+$('selDownload').onclick = async () => {
+  if (!(await app.saveAll())) return setStatus('not downloaded: an open file could not be saved', 'err');
+  const r = await fetch('/api/export?paths=' + encodeURIComponent(JSON.stringify(topmost([...selected]))));
+  if (!r.ok) return setStatus(`not downloaded: ${(await r.json().catch(() => ({}))).error || r.status}`, 'err');
+  const url = URL.createObjectURL(await r.blob());
+  el('a', { href: url, download: `${folderName()}-files.zip` }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  setStatus(`downloaded ${selected.size} selected (saved files)`, 'ok');
+};
+// open files with unsaved changes (the tabs list the open files)
+const unsavedPaths = () => [...document.querySelectorAll('#tabs .tab')].map(t => t.dataset.path).filter(p => app.isDirty(p));
+$('selDelete').onclick = () => {
+  const n = selected.size, plan = forDeleting([...selected], project.main, unsavedPaths());
+  const held = plan.skip.length ? ` (skips ${plan.skip.length} unsaved)` : '';
+  confirmClick($('selDelete'), `Delete ${n}?${held}`, async () => {
+    const { remove, keep, skip } = forDeleting([...selected], project.main, unsavedPaths());   // as they are now
+    const deleted = [], failed = [];
+    for (const path of remove) {   // a folder takes the files in it along; one failing does not stop the others
+      const r = await post('/api/fs/delete', { path });
+      if (r.ok) { deleted.push(path); app.dropDoc(path); } else failed.push({ path, error: r.error || r.status });
+    }
+    selected = new Set(); anchor = null;
+    await loadFiles(); app.filesChanged?.();
+    setStatus(deletionReport({ deleted, keep, skip, failed }, project.main), keep.length || skip.length || failed.length ? 'err' : 'ok');
+  });
+};
+$('selClear').onclick = () => { selected = new Set(); anchor = null; renderFiles(); };
+
 // ---------- new / rename form ----------
 let form = null;   // { kind: 'file' | 'folder' | 'rename', from }
 function openForm(kind, value) {
@@ -121,6 +183,8 @@ $('fsInput').addEventListener('keydown', async e => {
     if (!r.ok) return ($('fsHint').textContent = r.error);
     app.renameDoc(form.from, r.path);
     clicked = followRename(clicked, form.from, r.path);
+    selected = new Set(renameSelection([...selected], form.from, r.path));
+    if (anchor) anchor = renameSelection([anchor], form.from, r.path)[0];
     if (r.main !== project.main) { project.main = r.main; app.refreshSettings?.(); }
     closeForm(); await loadFiles(); app.filesChanged?.();
     setStatus(`renamed to ${r.path}`, 'ok');

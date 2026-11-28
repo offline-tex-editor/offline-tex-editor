@@ -699,6 +699,29 @@ class ExportZip(ServerCase):
             self.assertEqual(z.read('kapitel/Über.tex'), 'Ü'.encode())
             self.assertTrue(z.getinfo('kapitel/Über.tex').flag_bits & 0x800)   # names marked as UTF-8
 
+    def test_export_selected_files(self):
+        write(self.root, {'figures/a.png': b'A', 'figures/sub/b.png': b'B', 'figures/.hidden': 'x',
+                          'build/main.bbl': 'bbl'})
+        paths = json.dumps(['refs.bib', 'figures'])
+        code, data, _ = self.get('/api/export?paths=' + urllib.parse.quote(paths))
+        self.assertEqual(code, 200, data)
+        with zipfile.ZipFile(io.BytesIO(data)) as z:   # the folder with what is in it, and no .bbl
+            self.assertEqual(sorted(z.namelist()), ['figures/a.png', 'figures/sub/b.png', 'refs.bib'])
+        write(self.root, {'empty/inner/.keep': ''})   # folders with nothing to download stay, as empty folders
+        code, data, _ = self.get('/api/export?paths=' + urllib.parse.quote('["empty", "figures/sub"]'))
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            self.assertEqual(sorted(z.namelist()), ['empty/inner/', 'figures/sub/b.png'])
+        self.assertEqual(self.get('/api/export?paths=' + urllib.parse.quote('["../outside"]'))[0], 403)
+        outside = Path(self.tmp.name) / 'elsewhere'
+        outside.mkdir()
+        try:   # a selected folder that is a link to a folder outside the project is refused too
+            (self.root / 'linked').symlink_to(outside, target_is_directory=True)
+        except OSError:  # Windows without the right to make links
+            pass
+        else:
+            self.assertEqual(self.get('/api/export?paths=' + urllib.parse.quote('["linked"]'))[0], 403)
+        self.assertEqual(self.get('/api/export?paths=' + urllib.parse.quote('{"a": 1}'))[0], 400)
+
 
 class SearchApi(ServerCase):
     def test_search_and_replace(self):

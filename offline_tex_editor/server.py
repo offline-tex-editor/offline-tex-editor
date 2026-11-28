@@ -572,21 +572,33 @@ def export_file(path):
         return None
 
 
-def export_zip():
+def export_zip(paths=None):
     """The project's sources as a .zip, as they are saved: its files, without build/, .git/ or other hidden files and
     folders (.latexmkrc is kept), and with the bibliography made in the last compile (build/<job>.bbl) next to the
-    main document, named after it, which is where arXiv for one looks for it. A .bbl of the project's own is kept."""
+    main document, named after it, which is where arXiv for one looks for it. A .bbl of the project's own is kept.
+    With `paths` (files and folders, relative to ROOT), only those files and the files in those folders, for
+    downloading the files selected in the file list."""
+    picked = None if paths is None else [rel_of(safe(rel)) for rel in paths]
     buf, names = io.BytesIO(), set()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
         for p, rel in project.walk(ROOT):
+            if picked is not None and not any(rel == r or rel.startswith(r + '/') for r in picked):
+                continue
             hidden = any(part.startswith('.') for part in rel.split('/')) and rel not in project.EDITABLE_NAMES
             real = export_file(p)
             if hidden or real is None:
                 continue
             z.write(real, rel)
             names.add(rel)
+        if picked is not None:  # selected folders with no files to download are kept as empty folders
+            for d in sorted(project.list_dirs(ROOT), key=lambda d: -d.count('/')):  # deepest first
+                inside = any(d == r or d.startswith(r + '/') for r in picked)
+                hidden = any(part.startswith('.') for part in d.split('/'))
+                if inside and not hidden and not any(n.startswith(d + '/') for n in names):
+                    z.writestr(d + '/', '')
+                    names.add(d + '/')
         bbl, name = export_file(ROOT / 'build' / f'{JOB}.bbl'), Path(MAIN).with_suffix('.bbl').as_posix()
-        if bbl is not None and name not in names:
+        if picked is None and bbl is not None and name not in names:
             z.write(bbl, name)
     return buf.getvalue()
 
@@ -894,8 +906,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {'error': 'the PDF is still being written'})
                 return self.send(200, (ROOT / 'build' / f'{JOB}.pdf').read_bytes(), 'application/pdf')
             if u.path == '/api/export':
-                note = export_note()
-                return self.send(200, export_zip(), 'application/zip',
+                paths = json.loads(q['paths']) if 'paths' in q else None
+                if paths is not None and not (isinstance(paths, list) and all(isinstance(x, str) for x in paths)):
+                    raise UserError('paths must be a list of file and folder names')
+                note = export_note() if paths is None else None   # a selection has no .bbl
+                return self.send(200, export_zip(paths), 'application/zip',
                                  headers={'X-Export-Note': quote(note)} if note else None)
             if u.path == '/api/raw':
                 p = asset(q['path'])
