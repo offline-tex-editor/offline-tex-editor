@@ -111,6 +111,7 @@ label.tog:has(input:focus-visible) { outline: 2px solid var(--accent); outline-o
 #files .f:hover, #files .dir:hover { background: var(--bg); }
 #files .f.active { background: var(--sel); font-weight: 600; }
 #files .f.active .ic { color: var(--accent); }
+#files .dir.cur { background: var(--sel); }   /* where Add files and New file/folder go */
 #files .f.asset .nm { color: var(--muted); }
 #files .f.mod .nm::after { content: " ●"; color: var(--warn); }
 #files .badge { font-size: 10px; font-weight: 600; color: var(--accent); background: var(--sel); border-radius: 4px; padding: 1px 5px; }

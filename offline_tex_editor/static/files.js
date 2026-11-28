@@ -1,13 +1,19 @@
 // The file list: tree, filter, new/rename/delete, upload (button or drag and drop), image and PDF previews.
 import { $, el, app, state, project, store, pkey, api, post, setStatus, dirOf, baseName, icon } from './util.js';
+import { currentFolder, followRename, stillListed } from './folders.js';
 
 const IMAGE = /\.(png|jpe?g|gif|svg|webp|bmp)$/i;
 const fileIcon = p => icon(IMAGE.test(p) ? 'image' : /\.bib$/i.test(p) ? 'bib' : /\.(tex|ltx|sty|cls)$/i.test(p) ? 'tex' : 'file');
+// The folder that Add files, New file and New folder work in (see folders.js); it follows renames and is forgotten when
+// what was clicked is gone.
+let clicked = null;   // { path, dir } of the last row clicked
+const currentDir = () => currentFolder(clicked, state.current);
 
 export async function loadFiles() {
   const r = await api('/api/files');
   if (!r.ok) return setStatus('cannot list files: ' + (r.error || r.status), 'err');
   Object.assign(project, { root: r.root, main: r.main, files: r.files || [], assets: r.assets || [], dirs: r.dirs || [] });
+  clicked = stillListed(clicked, [...project.files, ...project.assets], project.dirs);
   $('mainDoc').textContent = project.main;
   renderFiles();
 }
@@ -31,7 +37,7 @@ export function renderFiles() {
   const rows = [];
   const fileRow = (f, depth) => {
     const row = el('div', { className: 'f' + (f.asset ? ' asset' : '') + (f.path === state.current ? ' active' : '') + (app.isDirty?.(f.path) ? ' mod' : ''),
-                            title: f.path, dataset: { path: f.path }, onclick: () => f.asset ? preview(f.path) : app.openFile(f.path) },
+                            title: f.path, dataset: { path: f.path }, onclick: () => { clicked = { path: f.path, dir: false }; f.asset ? preview(f.path) : app.openFile(f.path); } },
       fileIcon(f.path), el('span', { className: 'nm' }, baseName(f.path)),
       f.path === project.main ? el('span', { className: 'badge', title: 'Main document' }, 'main') : null,
       actions(f.path, false));
@@ -46,7 +52,8 @@ export function renderFiles() {
       const d = path ? `${path}/${name}` : name, child = n.dirs.get(name);
       if (q && !hasMatch(child, q)) continue;
       const open = q || !collapsed.has(d);
-      const head = el('div', { className: 'dir toggle' + (open ? ' open' : ''), title: d, dataset: { dir: d }, onclick: () => {
+      const head = el('div', { className: 'dir toggle' + (open ? ' open' : '') + (clicked?.dir && clicked.path === d ? ' cur' : ''), title: d, dataset: { dir: d }, onclick: () => {
+        clicked = { path: d, dir: true };
         const s = new Set(store.get(pkey('collapsed'), [])); s.has(d) ? s.delete(d) : s.add(d); store.set(pkey('collapsed'), [...s]); renderFiles();
       } }, icon('chevron', 'chev'), icon('folder', 'fold'), el('span', { className: 'nm' }, name), actions(d, true));
       head.style.paddingLeft = (6 + depth * 14) + 'px';
@@ -57,6 +64,8 @@ export function renderFiles() {
   walk(tree(), '', 0);
   box.replaceChildren(...rows);
 }
+// a click below the rows makes the project folder the current folder again
+$('files').addEventListener('click', e => { if (e.target === $('files')) { clicked = { path: '', dir: true }; renderFiles(); } });
 const hasMatch = (n, q) => n.files.some(f => f.path.toLowerCase().includes(q)) || [...n.dirs.values()].some(c => hasMatch(c, q));
 $('filter').oninput = renderFiles;
 
@@ -90,7 +99,7 @@ function openForm(kind, value) {
   form = { kind, from: kind === 'rename' ? value : null };
   $('fsForm').hidden = false;
   const input = $('fsInput');
-  input.value = value || (state.current && dirOf(state.current) ? dirOf(state.current) + '/' : '');
+  input.value = value || (currentDir() ? currentDir() + '/' : '');
   $('fsHint').textContent = kind === 'rename' ? 'New path (Enter to rename, Esc to cancel)'
     : kind === 'folder' ? 'Folder path (Enter to create, Esc to cancel)' : 'File path, e.g. chapters/intro.tex (Enter to create)';
   input.focus();
@@ -110,6 +119,7 @@ $('fsInput').addEventListener('keydown', async e => {
     const r = await post('/api/fs/rename', { from: form.from, to: path });
     if (!r.ok) return ($('fsHint').textContent = r.error);
     app.renameDoc(form.from, r.path);
+    clicked = followRename(clicked, form.from, r.path);
     if (r.main !== project.main) { project.main = r.main; app.refreshSettings?.(); }
     closeForm(); await loadFiles(); app.filesChanged?.();
     setStatus(`renamed to ${r.path}`, 'ok');
@@ -146,9 +156,13 @@ async function upload(files, dir) {
   if (n) { await loadFiles(); app.filesChanged?.(); setStatus(`added ${n} file${n > 1 ? 's' : ''}${dir ? ' to ' + dir : ''}`, 'ok'); }
 }
 $('uploadBtn').onclick = () => $('uploadInput').click();
+// the tooltip names the folder at the time it is shown (opening a file from a tab changes it too)
+const uploadTitle = () => { $('uploadBtn').title = `Add files to ${currentDir() || 'the project folder'} (or drop them on a folder)`; };
+$('uploadBtn').addEventListener('pointerenter', uploadTitle);
+$('uploadBtn').addEventListener('focus', uploadTitle);
 $('uploadInput').onchange = async () => {
   const files = [...$('uploadInput').files]; $('uploadInput').value = '';
-  await upload(files, state.current ? dirOf(state.current) : '');
+  await upload(files, currentDir());
 };
 const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
 $('files').addEventListener('dragover', e => {
